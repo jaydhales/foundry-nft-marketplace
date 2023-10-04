@@ -98,12 +98,25 @@ contract MarketPlaceTest is Test {
 
     // }
 
+    function testIncorrect() public {
+        _preloadOrder();
+        _create();
+
+        address spender = vm.addr(spenderPriv);
+        deal(creator, 100 ether);
+        vm.stopPrank();
+        vm.startPrank(spender);
+
+        vm.expectRevert("Incorrect ether value");
+        marketPlace.executeOrder{value: 0}(0);
+    }
+
     // function testExecuteOrder() public {
     //     _preloadOrder();
     //     _create();
 
     //     address spender = vm.addr(spenderPriv);
-    //     deal(spender, 100 ether);
+    //     deal(creator, 100 ether);
     //     vm.stopPrank();
     //     vm.startPrank(spender);
 
