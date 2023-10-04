@@ -50,7 +50,7 @@ contract MarketPlaceTest is Test {
 
     function testApproval() public {
         vm.expectRevert(bytes("Permission not granted to spent this token"));
-        marketPlace.createOrder(tokenAddress, tokenID, price, deadline, signature);
+        _create();
     }
 
     function testCRPriceNotZero() public {
@@ -77,7 +77,7 @@ contract MarketPlaceTest is Test {
     function testCreateOrder() public {
         _preloadOrder();
 
-        marketPlace.createOrder(tokenAddress, tokenID, price, deadline, signature);
+        _create();
 
         Order memory _order = marketPlace.getOrder(0);
 
@@ -99,13 +99,15 @@ contract MarketPlaceTest is Test {
     // }
 
     // function testExecuteOrder() public {
-    //     vm.stopPrank();
+    //     _preloadOrder();
+    //     _create();
+
     //     address spender = vm.addr(spenderPriv);
     //     deal(spender, 100 ether);
+    //     vm.stopPrank();
     //     vm.startPrank(spender);
-    //     (bool success,) =
-    //         payable(address(marketPlace)).call{value: price}(abi.encodeWithSignature("executeOrder('uint256')", 0));
-    //     assertTrue(success);
+
+    //     marketPlace.executeOrder{value: price}(0);
     // }
 
     function _preloadOrder() internal {
@@ -113,5 +115,9 @@ contract MarketPlaceTest is Test {
         _nft.setApprovalForAll(address(marketPlace), true);
 
         assertTrue(_nft.isApprovedForAll(creator, address(marketPlace)));
+    }
+
+    function _create() internal {
+        marketPlace.createOrder(tokenAddress, tokenID, price, deadline, signature);
     }
 }
