@@ -3,134 +3,159 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 import {MarketPlace, Order} from "../src/MarketPlace.sol";
-import "openzeppelin/interfaces/IERC721.sol";
-import "openzeppelin/utils/cryptography/ECDSA.sol";
+import "../src/MockNft.sol";
+import "./Helper.sol";
 
-interface IMockNft is IERC721 {
-    function safeMint(address to, uint256 tokenId) external;
-}
+contract MarketPlaceTest is Helpers {
+    MarketPlace marketPlace;
+    MockNft mockNft;
 
-contract MarketPlaceTest is Test {
-    using ECDSA for bytes32;
+    uint256 creatorPriv;
+    uint256 spenderPriv;
 
-    MarketPlace public marketPlace;
-    uint256 internal creatorPriv;
-    uint256 internal spenderPriv;
     address creator;
-    address tokenAddress;
-    uint256 tokenID;
-    uint256 price;
-    uint256 deadline;
-    bytes signature;
+    address spender;
+
+    Order ord;
 
     function setUp() public {
         marketPlace = new MarketPlace();
+        mockNft = new MockNft();
 
-        creatorPriv = 67890;
-        spenderPriv = 23423;
-        creator = vm.addr(creatorPriv);
-        tokenAddress = 0xAc4D78798804e2463E7785698d51239CfA768DAd;
-        tokenID = 2972;
-        price = 2 ether;
-        deadline = 2 days;
+        (creator, creatorPriv) = mkaddr("CREATOR");
+        (spender, spenderPriv) = mkaddr("SPENDER");
 
-        IMockNft(tokenAddress).safeMint(creator, tokenID);
-        vm.startPrank(creator);
-        bytes32 hashMsg = marketPlace.genHash(tokenAddress, tokenID, price, deadline);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(creatorPriv, hashMsg.toEthSignedMessageHash());
-        signature = abi.encodePacked(r, s, v);
+        switchSigner(creator);
+        mockNft.safeMint(creator, 256);
     }
 
-    function testSig() public {
-        bytes32 hashMsg = marketPlace.genHash(tokenAddress, tokenID, price, deadline);
-        bytes32 _ethSignedMsg = hashMsg.toEthSignedMessageHash();
-        address owner = _ethSignedMsg.recover(signature);
-        assertEq(owner, creator);
+    function testTokenAddrNotZero() public {
+        vm.expectRevert("Address can not be zero");
+        marketPlace.createOrder(address(0), 256, 1 ether, 0, bytes(""));
     }
 
-    function testApproval() public {
-        vm.expectRevert(bytes("Permission not granted to spent this token"));
-        _create();
+    function testPriceNotZero() public {
+        vm.expectRevert("Price can not be zero");
+        marketPlace.createOrder(address(mockNft), 256, 0, 0, bytes(""));
     }
 
-    function testCRPriceNotZero() public {
-        _preloadOrder();
-        vm.expectRevert(bytes("Empty Price not allowed"));
-        marketPlace.createOrder(tokenAddress, tokenID, 0, deadline, signature);
+    function testShortDeadline() public {
+        vm.expectRevert("Deadline too short");
+        marketPlace.createOrder(address(mockNft), 256, 2 ether, 500, bytes(""));
     }
 
-    function testCRNotZero() public {
-        _preloadOrder();
-        vm.expectRevert(bytes("Address can not be zero"));
-        marketPlace.createOrder(address(0), tokenID, price, deadline, signature);
+    function testInvalidTokenID() public {
+        vm.expectRevert();
+        marketPlace.createOrder(
+            address(mockNft),
+            246,
+            1 ether,
+            3700,
+            bytes("")
+        );
     }
 
-    function testNotTokenOwner() public {
-        _preloadOrder();
-        vm.expectRevert(bytes("ERC721: invalid token ID"));
-        marketPlace.createOrder(tokenAddress, 200, price, deadline, signature);
+    function testNotOwner() public {
+        switchSigner(spender);
+        vm.expectRevert("You do not own this nft");
+        marketPlace.createOrder(
+            address(mockNft),
+            256,
+            1 ether,
+            3700,
+            bytes("")
+        );
+    }
 
-        vm.expectRevert(bytes("You do not own this nft"));
-        marketPlace.createOrder(0xbF9399725B4ef6B872a13C87257b99a77caf34e8, 1, price, deadline, signature);
+    function testNoApproval() public {
+        vm.expectRevert("Permission not granted to spent this token");
+        marketPlace.createOrder(
+            address(mockNft),
+            256,
+            1 ether,
+            3700,
+            bytes("")
+        );
     }
 
     function testCreateOrder() public {
-        _preloadOrder();
-
-        _create();
-
-        Order memory _order = marketPlace.getOrder(0);
-
-        assertEq(_order.tokenAddress, tokenAddress);
-        assertEq(_order.tokenID, tokenID);
-        assertEq(_order.price, price);
-        assertEq(_order.deadline, block.timestamp + deadline);
-        assertEq(_order.sig, signature);
-        assertEq(_order.creator, creator);
-        assertTrue(_order.isActive);
-        assertEq(marketPlace.orderCount(), 1);
+        mockNft.setApprovalForAll(address(marketPlace), true);
+        marketPlace.createOrder(
+            address(mockNft),
+            256,
+            1 ether,
+            5000,
+            bytes("")
+        );
+        Order memory o = marketPlace.getOrder(0);
+        assertEq(o.tokenAddress, address(mockNft));
+        assertEq(o.tokenID, 256);
+        assertEq(o.price, 1 ether);
+        assertEq(o.sig, bytes(""));
+        assertEq(o.deadline, block.timestamp + 5000);
+        assertEq(o.creator, creator);
     }
 
-    // function testEventOrderListed() public {
-    //     _preloadOrder();
-    //     vm.expectEmit(creator, marketPlace.orderCount(), price );
-    //      marketPlace.createOrder(tokenAddress, tokenID, price, deadline, signature);
+    function testInvalidOrderId() public {
+        _preOrder();
+        vm.expectRevert(MarketPlace.Invalid_Order_Id.selector);
+        marketPlace.executeOrder(15);
+    }
 
+    function testOrderExpired() public {
+        _preOrder();
+        vm.warp(6000);
+        vm.expectRevert(MarketPlace.Order_Expired.selector);
+        marketPlace.executeOrder(0);
+    }
+
+    function testIncorrectEther() public {
+        _preOrder();
+        vm.expectRevert(MarketPlace.Incorrect_Ether_Value.selector);
+        marketPlace.executeOrder{value: 2 ether}(0);
+    }
+
+    function testExecuteOrder() public {
+        _preOrder();
+        switchSigner(spender);
+        uint balanceBefore = spender.balance;
+        marketPlace.executeOrder{value: 1 ether}(0);
+
+        assertEq(mockNft.ownerOf(256), spender);
+        assertEq(spender.balance, balanceBefore - 1 ether);
+    }
+
+    // function testEmitExecuteEvent() public {
+    //     _preOrder();
+    //     vm.expectEmit(true, true, true, true);
+    //     emit MarketPlace.OrderExecuted(0, 1 ether, creator);
+    //     marketPlace.executeOrder{value: 1 ether}(0);
     // }
 
-    function testIncorrect() public {
-        _preloadOrder();
-        _create();
-
-        address spender = vm.addr(spenderPriv);
-        deal(creator, 100 ether);
-        vm.stopPrank();
-        vm.startPrank(spender);
-
-        vm.expectRevert("Incorrect ether value");
-        marketPlace.executeOrder{value: 0}(0);
-    }
-
-    // function testExecuteOrder() public {
-    //     _preloadOrder();
-    //     _create();
-
-    //     address spender = vm.addr(spenderPriv);
-    //     deal(creator, 100 ether);
-    //     vm.stopPrank();
-    //     vm.startPrank(spender);
-
-    //     marketPlace.executeOrder{value: price}(0);
+    // function testEmitOrderEvent() public {
+    //     mockNft.setApprovalForAll(address(marketPlace), true);
+    //     vm.expectEmit(true, true, true, false);
+    //     emit MarketPlace.OrderListed(creator, 1, 1 ether);
+    //     marketPlace.createOrder(
+    //         address(mockNft),
+    //         256,
+    //         1 ether,
+    //         5000,
+    //         bytes("")
+    //     );
     // }
 
-    function _preloadOrder() internal {
-        IMockNft _nft = IMockNft(tokenAddress);
-        _nft.setApprovalForAll(address(marketPlace), true);
+    function _preOrder() internal {
+        mockNft.setApprovalForAll(address(marketPlace), true);
+        bytes memory sig = constructSig(
+            address(mockNft),
+            256,
+            1 ether,
+            5000,
+            creator,
+            creatorPriv
+        );
 
-        assertTrue(_nft.isApprovedForAll(creator, address(marketPlace)));
-    }
-
-    function _create() internal {
-        marketPlace.createOrder(tokenAddress, tokenID, price, deadline, signature);
+        marketPlace.createOrder(address(mockNft), 256, 1 ether, 5000, sig);
     }
 }
