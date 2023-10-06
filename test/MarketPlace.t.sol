@@ -10,6 +10,17 @@ contract MarketPlaceTest is Helpers {
     MarketPlace marketPlace;
     MockNft mockNft;
 
+    event OrderListed(
+        address indexed _owner,
+        uint256 indexed _orderID,
+        uint256 indexed price
+    );
+    event OrderExecuted(
+        uint256 indexed _orderID,
+        uint256 indexed price,
+        address indexed _buyer
+    );
+
     uint256 creatorPriv;
     uint256 spenderPriv;
 
@@ -125,25 +136,25 @@ contract MarketPlaceTest is Helpers {
         assertEq(spender.balance, balanceBefore - 1 ether);
     }
 
-    // function testEmitExecuteEvent() public {
-    //     _preOrder();
-    //     vm.expectEmit(true, true, true, true);
-    //     emit MarketPlace.OrderExecuted(0, 1 ether, creator);
-    //     marketPlace.executeOrder{value: 1 ether}(0);
-    // }
+    function testEmitExecuteEvent() public {
+        _preOrder();
+        vm.expectEmit(true, true, true, false);
+        emit OrderExecuted(0, 1 ether, creator);
+        marketPlace.executeOrder{value: 1 ether}(0);
+    }
 
-    // function testEmitOrderEvent() public {
-    //     mockNft.setApprovalForAll(address(marketPlace), true);
-    //     vm.expectEmit(true, true, true, false);
-    //     emit MarketPlace.OrderListed(creator, 1, 1 ether);
-    //     marketPlace.createOrder(
-    //         address(mockNft),
-    //         256,
-    //         1 ether,
-    //         5000,
-    //         bytes("")
-    //     );
-    // }
+    function testEmitOrderEvent() public {
+        mockNft.setApprovalForAll(address(marketPlace), true);
+        vm.expectEmit(true, true, true, false);
+        emit OrderListed(creator, 1, 1 ether);
+        marketPlace.createOrder(
+            address(mockNft),
+            256,
+            1 ether,
+            5000,
+            bytes("")
+        );
+    }
 
     function _preOrder() internal {
         mockNft.setApprovalForAll(address(marketPlace), true);
